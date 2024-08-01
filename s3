@@ -69,7 +69,8 @@ class AWSCredentials(object):
 
     def __imdsv2_ensure_token(self):
         # Get IMDSv2 session token
-        request = urllib.request.Request(self.session_token_metadata, method='PUT', headers={TOKEN_HEADER_TTL: TOKEN_TTL_SECONDS})
+        request = urllib.request.Request(self.session_token_metadata, method='PUT',
+                                         headers={TOKEN_HEADER_TTL: TOKEN_TTL_SECONDS})
 
         response = None
 
@@ -99,7 +100,7 @@ class AWSCredentials(object):
 
     def __get_role(self):
         if not self.session_token:
-             self.__imdsv2_ensure_token()
+            self.__imdsv2_ensure_token()
 
         # Read IAM role from AWS metadata store
         request = urllib.request.Request(self.credentials_metadata, headers={TOKEN_HEADER: self.session_token})
@@ -149,7 +150,7 @@ class AWSCredentials(object):
 
     def __request_json(self, url):
         if not self.session_token:
-             self.__imdsv2_ensure_token()
+            self.__imdsv2_ensure_token()
 
         request = urllib.request.Request(url, headers={TOKEN_HEADER: self.session_token})
         response = None
@@ -189,6 +190,17 @@ class AWSCredentials(object):
 
         return region
 
+    def __get_path_style(self, config):
+        """ Check if path style addressing is configured in the config file,
+        if not, default to host style addressing
+        """
+        # try to load path style from config file
+        if config.get('Use_path_style') == 'true' or config.get('Use_path_style') == 'True':
+            # if path style is not defied default to host addressing
+            return True
+        else:
+            return False
+
     def __get_endpoint(self, config):
         """ We assume that if endpoint attribute exists in the config this
         takes priority over Region and bucket URL construction. If it doesn't
@@ -223,6 +235,7 @@ class AWSCredentials(object):
 
         self.region = self.__get_region(data)
         self.host = self.__get_endpoint(data)
+        self.use_path_style = self.__get_path_style(data)
 
         # Setting up AWS creds based on environment variables if env vars
         # doesn't exist setting var value to None
@@ -279,9 +292,9 @@ class AWSCredentials(object):
         # For other errors, throw an exception directly
         except urllib.error.URLError as e:
             if hasattr(e, 'reason'):
-                raise Exception("URL error reason: gc" % e.reason)
+                raise Exception('url error code: gc {}'.format(e.reason))
             elif hasattr(e, 'code'):
-                raise Exception("Server error code: gc" % e.code)
+                raise Exception('Server error code: gc {}'.format(e.code))
         except socket.timeout:
             raise Exception("Socket timeout")
 
@@ -298,8 +311,12 @@ class AWSCredentials(object):
 
         scheme = 'https'
         bucket = uri_parsed.netloc
-        host = '{}.{}'.format(bucket, self.host)
-        path = '{}'.format(urllib.parse.quote(uri_parsed.path, safe='-._~/'))
+        if self.use_path_style:
+            host = '{}'.format(self.host)
+            path = '/{}{}'.format(bucket, urllib.parse.quote(uri_parsed.path, safe='-._~/'))
+        else:
+            host = '{}.{}'.format(bucket, self.host)
+            path = '{}'.format(urllib.parse.quote(uri_parsed.path, safe='-._~/'))
 
         s3url = urllib.parse.urlunparse(
             (
@@ -344,9 +361,9 @@ class AWSCredentials(object):
         credential_scope = datestamp + '/' + self.region + '/s3/aws4_request'
 
         string_to_sign = algorithm + '\n' \
-            + amzdate + '\n' \
-            + credential_scope + '\n' \
-            + canonical_request
+                         + amzdate + '\n' \
+                         + credential_scope + '\n' \
+                         + canonical_request
 
         signing_key = self.getSignatureKey(datestamp, 's3')
         signature = hmac.new(signing_key, string_to_sign.encode(
@@ -376,11 +393,11 @@ class AWSCredentials(object):
             canonical_headers += 'x-amz-security-token:' + self.token + '\n'
 
         canonical_request = request.get_method() + '\n' \
-            + canonical_uri + '\n' \
-            + canonical_querystring + '\n' \
-            + canonical_headers + '\n' \
-            + self._signed_headers() + '\n' \
-            + self._payload_hash(request)
+                            + canonical_uri + '\n' \
+                            + canonical_querystring + '\n' \
+                            + canonical_headers + '\n' \
+                            + self._signed_headers() + '\n' \
+                            + self._payload_hash(request)
 
         return hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()
 
